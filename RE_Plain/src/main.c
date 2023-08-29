@@ -146,18 +146,23 @@ int main()
 	drive(0.0,0.0,1.0);
 	
 	while(true){ //this is an infinite loop (true is always true)
-		read_sensors(); //read all sensors and set global variables of their readouts
-		if(is_front_bump())
-        {
-            escape_front();
-        }
-        else if(is_above_distance_threshold(avoid_threshold))
-        {
-            avoid();
-        }
-        else
-        {
-			cruise_straight();
+		if(timer_elapsed()){
+            read_sensors(); //read all sensors and set global variables of their readouts
+            if(is_front_bump())
+            {
+                escape_front();
+                //continue;
+            }
+            else if(is_above_distance_threshold(avoid_threshold))
+            {
+                avoid();
+                //continue;
+            }
+            else
+            {
+                cruise_straight();
+                //continue;
+            }
         }
     }//end while true
 	
@@ -247,11 +252,11 @@ void escape_front()
 	
     if(front_bump_left_value == 1 || front_bump_center_value == 1)
     {
-        drive(-0.08, -1, 2.5); //drive backwards in an arc
+        drive(-0.08, -1, 2); //drive backwards in an arc
     }
     else
     {
-        drive(-1, -0.08, 2.5); //drive backwards in an arc
+        drive(-1, -0.08, 2); //drive backwards in an arc
     }
 }
 /******************************************************/
