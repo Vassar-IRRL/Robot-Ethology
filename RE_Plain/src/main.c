@@ -102,12 +102,6 @@ int digital(int pin);							// get the digital value of a sensor on the specifie
 unsigned long systime();						// get the system time
 void set_servo_position(int pin, int position); // set a servo at the specified pin to the specified position
 
-//GUI FUNCTIONS
-void update_gui(); //this function contains our gui update feature
-void print_subsumption_hierarchy(struct behavior *array, size_t len);
-void print_set_hierarchy();
-void randomize_hierarchy();
-
 // *** Variable Definitions *** //
 
 // global variables to store all current sensor values accessible to all functions and updated by the "read_sensors" function
@@ -130,19 +124,14 @@ unsigned long start_time = 0; // store the system time each time we start an act
 struct behavior subsumption_hierarchy[] = {
 	{"ESCAPE FRONT", ESCAPE_F_TYPE, 0, false},
 	{"ESCAPE BACK", ESCAPE_B_TYPE, 0, false},
-	{"AVOID", AVOID_TYPE, 0, false},
-	{"SEEK LIGHT", SEEK_LIGHT_TYPE, 0, true},
+	{"AVOID", AVOID_TYPE, 0, true},
+	{"SEEK LIGHT", SEEK_LIGHT_TYPE, 0, false},
 	{"CRUISE STRAIGHT", CRUISE_S_TYPE, 0, true},
 	{"SEEK DARK",  SEEK_DARK_TYPE, 0, false},
 	{"APPROACH", APPROACH_TYPE, 0, false},
 	{"CRUISE ARC", CRUISE_A_TYPE, 0, false}
 };
 int hierarchy_length; //set in main function based on number of elements in subsumption_hierarchy defined above
-int cursor_row = 0; //the row that the cursor is on in gui mode
-bool show_gui = true;	//boolean toggled by pushing the white side button on the kipr link
-bool first_gui = false; 	//on first exposure to gui, we randomize the hierarchy so the initialized behavior can't be observed
-bool is_side_update = false;			//sort on button press
-bool update_operating_console = false;	//a boolean to tell us when to update the operating console.  If we constantly reprint and clear, we get flicker, so we only print once when necessary
 
 //==================================//
 //===============MAIN===============//
@@ -157,75 +146,20 @@ int main()
 	drive(0.0,0.0,1.0);
 	
 	while(true){ //this is an infinite loop (true is always true)
-		update_gui(); //update our gui in any case
-		
-		if(!show_gui){ //if we aren't showing the gui, we must be sensing and acting
-			
-			if(update_operating_console){
-				//only enable the servos once when returning from the gui menu, this boolean is disabled in the next print_set_hierarchy function
-				enable_servo(LEFT_MOTOR_PIN);
-				enable_servo(RIGHT_MOTOR_PIN);
-				drive(0.0,0.0,2.0);
-			}
-			print_set_hierarchy(); //print the current subsumption hierarchy to the screen (only executes if gui has been accessed once before)
-			
-			read_sensors(); //read all sensors and set global variables of their readouts
-			
-			if(timer_elapsed()){ //any time a drive message is called, the timer is updated.  Until it is called again this should always return true
-				bool execute_action = false; //tell us if we have executed ANY action
-				size_t i;	//counter for hierarchy for loop
-				for(i=0; i<hierarchy_length; i++){ //for each behavior in our hierarchy
-					if(subsumption_hierarchy[i].is_active){ //if the behavior at this index is active...
-						switch(subsumption_hierarchy[i].type){ //run a switch/case statement to see which type this behavior is and do the appropriate action
-							//for the specified hierarchy type, check if we should execute the action, and do it if so.  If not, continue the for loop.  If so, execute action and break.
-							case SEEK_LIGHT_TYPE:
-							execute_action = is_above_photo_differential(photo_threshold);
-							if(execute_action) seek_light();
-							break;
-							case SEEK_DARK_TYPE:
-							execute_action = is_above_photo_differential(photo_threshold);
-							if(execute_action) seek_dark();
-							break;
-							case APPROACH_TYPE:
-							execute_action = is_above_distance_threshold(approach_threshold);
-							if(execute_action) approach();
-							break;
-							case AVOID_TYPE:
-							execute_action = is_above_distance_threshold(avoid_threshold);
-							if(execute_action) avoid();
-							break;
-							case ESCAPE_F_TYPE:
-							execute_action = is_front_bump();
-							if(execute_action) escape_front();
-							break;
-							case ESCAPE_B_TYPE:
-							execute_action = is_back_bump();
-							if(execute_action) escape_back();
-							break;
-							case CRUISE_S_TYPE:
-							execute_action = true;
-							cruise_straight();
-							break;
-							case CRUISE_A_TYPE:
-							execute_action = true;
-							cruise_arc();		
-							break;
-						} //end hierarchy type switch
-					} //end if active
-					if(execute_action){
-						break; //if any action was executed, break out of the subsumption hierarchy loop altogether
-					}//end if execute action	
-					else{
-						stop(); //if there is no action, stop
-					}
-				} //end for each item in hierarchy loop
-			}//end if timer elapsed
-		}//end if not show gui
-		
-		else{
-			disable_servos(); //disable all servo motors if we are in gui mode
-		}
-	}//end while true
+		read_sensors(); //read all sensors and set global variables of their readouts
+		if(is_front_bump())
+        {
+            escape_front();
+        }
+        else if(is_above_distance_threshold(avoid_threshold))
+        {
+            avoid();
+        }
+        else
+        {
+			cruise_straight();
+        }
+    }//end while true
 	
 	return 0; //due to infinite while loop, we will never get here
 }
@@ -332,11 +266,11 @@ void seek_light()
 	int photo_difference = right_photo_value - left_photo_value;
 	// positive photo_difference means left sensor is brighter
 	if (photo_difference > 0){
-		drive(0.2, -0.2, 0.25);
+		drive(-0.2, 0.2, 0.25);
 	}
 	// negative photo_difference means right sensor is brighter
 	if (photo_difference < 0){
-		drive(-0.2, 0.2, 0.25);
+		drive(0.2, -0.2, 0.25);
 	}
 }
 /******************************************************/
@@ -346,11 +280,11 @@ void seek_dark()
 	int photo_difference = right_photo_value - left_photo_value;
 	// positive photo_difference means left sensor is brighter
 	if (photo_difference > 0){
-		drive(0.2, -0.2, 0.25);
+		drive(-0.2, 0.2, 0.25);
 	}
 	// negative photo_difference means right sensor is brighter
 	if (photo_difference < 0){
-		drive(-0.2, 0.2, 0.25);
+		drive(0.2, -0.2, 0.25);
 	}
 }
 /******************************************************/
@@ -393,136 +327,3 @@ float map(float value, float start_range_low, float start_range_high, float targ
 	return target_range_low + ((value - start_range_low) / (start_range_high - start_range_low)) * (target_range_high - target_range_low);
 	// remap a value from a source range to a new range
 }
-
-//===============================GUI RELATED CODE========================================
-//===============================GUI RELATED CODE========================================
-//===============================GUI RELATED CODE========================================
-void update_gui(){
-	if(side_button_clicked()){
-		show_gui = !show_gui; //toggle our gui by pressing the side button
-		is_side_update = show_gui; //boolean to do certain behaviors once at button press
-		update_operating_console = true; //boolean to update the home console once
-	}
-	
-	if(show_gui){
-		if(first_gui){
-			randomize_hierarchy(); //this only ever happens once per program
-			first_gui = false;
-		}
-		
-		//stop();
-		bool cursor_update = false;
-		bool hierarchy_update = false;
-		
-		set_extra_buttons_visible(1); //we turn off the extra buttons (buttons xyz) when we are not in showgui mode, so we need to activate them here
-		
-		set_a_button_text(subsumption_hierarchy[cursor_row].is_active?"Deactivate":"Activate"); //set text to display activate or deactivate based on the behavior the cursor is on
-		set_b_button_text(subsumption_hierarchy[cursor_row].is_active?"Move Up":""); //set text to display "move up" or nothing based on the behavior the cursor is on
-		set_y_button_text(subsumption_hierarchy[cursor_row].is_active?"Move Down":"");	//set text to display "move down" or nothing based on the behavior the cursor is on
-		
-		set_c_button_text("\u25B2"); //up triangle unicode
-		set_z_button_text("\u25BC"); //unicode down triangle
-		
-		set_x_button_text("Reset");	//reset button for deactivating all
-		
-		if(c_button_clicked()){ //move the cursor up
-			cursor_row = (cursor_row - 1); //up cursor
-			if(cursor_row < 0) cursor_row += hierarchy_length; //if we go past zero, loop back to the end of the list
-			cursor_row = cursor_row%hierarchy_length;
-			cursor_update = true; //we've updated
-		}
-		
-		else if(z_button_clicked()) { //move cursor down
-			cursor_row = (cursor_row + 1)%hierarchy_length; //move cursor down and use modulus function to loop back to zero if we go down too far
-			cursor_update = true;
-		}
-		
-		else if(a_button_clicked()){ //activate or deactivate button
-			subsumption_hierarchy[cursor_row].is_active = !subsumption_hierarchy[cursor_row].is_active; //toggle our active state
-			hierarchy_update = true;
-		}
-		
-		else if(b_button_clicked()){
-			subsumption_hierarchy[cursor_row].rank -= 2; //move up
-			hierarchy_update = true;
-		}
-		
-		else if(y_button_clicked()){
-			subsumption_hierarchy[cursor_row].rank += 2; //move down
-			hierarchy_update = true;
-		}
-		
-		else if(x_button_clicked()){ //reset all button
-			size_t i; 
-			for(i=0; i<hierarchy_length; i++){
-				subsumption_hierarchy[i].is_active = false;
-			}
-			hierarchy_update = true;
-		}
-		
-		if(cursor_update || is_side_update || hierarchy_update){ //if we pressed anything at all
-			
-			qsort(subsumption_hierarchy, hierarchy_length, sizeof(behavior), compare_ranks); //sort our hierarchy based on rank value
-			
-			size_t i;
-			for(i=0; i<hierarchy_length; i++){
-				if(subsumption_hierarchy[i].is_active) subsumption_hierarchy[i].rank = i; //now reset the index of each sorted active behavior to be sequential with a step size of one
-				else subsumption_hierarchy[i].rank = hierarchy_length + 1; //give inactive behaviors a constant "poor" rank which is helpful to ensure new ones always jump above.
-			}
-			
-			console_clear(); // clear the console
-			print_subsumption_hierarchy(subsumption_hierarchy, hierarchy_length); //print the hierarchy and interface
-			is_side_update = false; //turn off the is_side_update boolean so we don't get screen flicker until we update the cursor or hierarchy next
-		}
-		
-	}
-	else{
-		set_a_button_text("");	//if we are not in show_gui mode, we must be operating, set our buttons to show nothing and hide the extra buttons
-		set_b_button_text("");	
-		set_c_button_text("");
-		set_extra_buttons_visible(0);
-	}
-}
-//-----------------RANDOMIZE HIERARCHY AND DEACTIVATE ALL-------------
-void randomize_hierarchy(){
-	size_t i;
-	for(i=0; i<hierarchy_length; i++){
-		subsumption_hierarchy[i].is_active = false;
-		subsumption_hierarchy[i].rank = rand();
-	}
-	qsort(subsumption_hierarchy, hierarchy_length, sizeof(behavior), compare_ranks); //sort our hierarchy based on rank value
-}
-//-------------------------MANAGE SCREEN PRINTING OF GUI--------------------
-void print_subsumption_hierarchy(struct behavior *array, size_t len){ 
-	size_t i;
-	for(i=0; i<len; i++){
-		display_printf(1,i,"%s          ",array[i].title);
-		if(array[i].is_active){
-			display_printf(17,i,"Active  ");
-		}
-		else{
-			display_printf(17,i,"Inactive ");
-		}
-		if(i == cursor_row){
-			display_printf(0, i, ">");
-			display_printf(25, i, "<");
-		}
-		else{
-			display_printf(0, i, " ");
-			display_printf(25, i, " ");
-		}
-		//display_printf(35, i, "%d", array[i].rank); //debug for showing rank
-	}
-}
-//--------------------MANAGE SCREEN PRINTING WHEN OPERATING---------------------
-void print_set_hierarchy(){ 
-	if(update_operating_console && !first_gui){
-		console_clear();
-		size_t i;
-		for(i=0; i<hierarchy_length; i++){
-			if(subsumption_hierarchy[i].is_active) printf(" %s\n",subsumption_hierarchy[i].title);
-		}
-		update_operating_console = false; //this only happens once per button press if we are not showing gui
-	}
-}
-//============================END GUI RELATED CODE========================================
