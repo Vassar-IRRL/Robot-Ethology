@@ -32,11 +32,10 @@ Revisions:	    Earlier version (2018) and revisions (2023) by Nick Livingston
 #define CRUISE_A_TYPE 7
 
 // *** Define PIN Address *** //
-
-#define RIGHT_IR_PIN 2
-#define LEFT_IR_PIN 3
-#define RIGHT_PHOTO_PIN 0
-#define LEFT_PHOTO_PIN 1 // analog sensors (IRs, photos)
+const int RIGHT_IR_PIN = 2;
+const int LEFT_IR_PIN = 3;
+const int RIGHT_PHOTO_PIN = 0;
+const int LEFT_PHOTO_PIN = 1; // analog sensors (IRs, photos)
 
 #define FRONT_BUMP_LEFT_PIN 5
 #define FRONT_BUMP_CENTER_PIN 3
@@ -70,7 +69,9 @@ int compare_ranks(const void *a, const void *b)
 } 
 
 //*************************************************** Function Declarations ***********************************************************//
-// PERCEPTION FUNCTIONS
+
+/*
+//PERCEPTION FUNCTIONS
 void read_sensors();							 // read all sensor values and save to global variables
 bool is_above_distance_threshold(int threshold); // return true if one and only one IR sensor is above the specified threshold
 bool is_above_photo_differential(int threshold); // return true if the absolute difference between photo sensor values is above the specified threshold
@@ -101,7 +102,7 @@ int analog_et(int pin);							// get the 10-bit analog value of a sensor on the 
 int digital(int pin);							// get the digital value of a sensor on the specified pin
 unsigned long systime();						// get the system time
 void set_servo_position(int pin, int position); // set a servo at the specified pin to the specified position
-
+*/
 // *** Variable Definitions *** //
 
 // global variables to store all current sensor values accessible to all functions and updated by the "read_sensors" function
@@ -110,7 +111,7 @@ int right_photo_value, left_photo_value, right_ir_value, left_ir_value, front_bu
 // threshold values
 int avoid_threshold = 1600;	   // the absolute difference between IR readings has to be above this for the avoid action
 int approach_threshold = 1600; // the absolute difference between IR readings has to be below this for the approach action
-int photo_threshold = 200;	   // the absolute difference between photo sensor readings has to be above this for seek light/dark actions
+int photo_threshold = 350;	   // the absolute difference between photo sensor readings has to be above this for seek light/dark actions
 
 // timer
 int timer_duration = 500;	  // the time in milliseconds to wait between calling action commands, changed by each drive command called by actions
@@ -133,40 +134,19 @@ struct behavior subsumption_hierarchy[] = {
 };
 int hierarchy_length; //set in main function based on number of elements in subsumption_hierarchy defined above
 
-//==================================//
-//===============MAIN===============//
-//==================================//
+//=====================================//
+//===============HELPERS===============//
+//=====================================//
 
-int main() 
+bool timer_elapsed()
 {
-	hierarchy_length = sizeof(subsumption_hierarchy) / sizeof(behavior); //set this variable once for loopin trhough the hierarchy
-	
-	enable_servo(LEFT_MOTOR_PIN);	//initialize both motors and set speed to zero
-	enable_servo(RIGHT_MOTOR_PIN);
-	drive(0.0,0.0,1.0);
-	
-	while(true){ //this is an infinite loop (true is always true)
-		if(timer_elapsed()){
-            read_sensors(); //read all sensors and set global variables of their readouts
-            if(is_front_bump())
-            {
-                escape_front();
-                //continue;
-            }
-            else if(is_above_distance_threshold(avoid_threshold))
-            {
-                avoid();
-                //continue;
-            }
-            else
-            {
-                cruise_straight();
-                //continue;
-            }
-        }
-    }//end while true
-	
-	return 0; //due to infinite while loop, we will never get here
+	return (systime() > (start_time + timer_duration)); // return true if the current time is greater than our start time plus timer duration
+}
+/******************************************************/
+float map(float value, float start_range_low, float start_range_high, float target_range_low, float target_range_high)
+{
+	return target_range_low + ((value - start_range_low) / (start_range_high - start_range_low)) * (target_range_high - target_range_low);
+	// remap a value from a source range to a new range
 }
 
 //========================================//
@@ -175,10 +155,10 @@ int main()
 
 void read_sensors()
 {
-	right_photo_value = analog_et(RIGHT_PHOTO_PIN);			// read the photo sensor at RIGHT_PHOTO_PIN; *** NOTE: greater value means less light ***
-	left_photo_value = analog_et(LEFT_PHOTO_PIN);			// read the photo sensor at LEFT_PHOTO_PIN; *** NOTE: greater value means less light ***
-	right_ir_value = analog_et(RIGHT_IR_PIN);				// read the IR sensor at RIGHT_IR_PIN
-	left_ir_value = analog_et(LEFT_IR_PIN);					// read the IR sensor at LEFT_IR_PIN
+	right_photo_value = analog(RIGHT_PHOTO_PIN);			// read the photo sensor at RIGHT_PHOTO_PIN; *** NOTE: greater value means less light ***
+	left_photo_value = analog(LEFT_PHOTO_PIN);			// read the photo sensor at LEFT_PHOTO_PIN; *** NOTE: greater value means less light ***
+	right_ir_value = analog(RIGHT_IR_PIN);				// read the IR sensor at RIGHT_IR_PIN
+	left_ir_value = analog(LEFT_IR_PIN);					// read the IR sensor at LEFT_IR_PIN
 	// read the bumpers
 	front_bump_left_value = digital(FRONT_BUMP_LEFT_PIN);   // read the bumper at FRONT_BUMP_LEFT_PIN
 	front_bump_center_value = digital(FRONT_BUMP_CENTER_PIN); // read the bumper at FRONT_BUMP_CENTER_PIN
@@ -203,12 +183,12 @@ bool is_above_distance_threshold(int threshold)
 /******************************************************/
 bool is_front_bump()
 {
-	return (front_bump_left_value == 1 || front_bump_center_value == 1 || front_bump_right_value == 1); // return true if one of the front bump values is 1, otherwise false
+	return (front_bump_left_value == 0 || front_bump_right_value == 0); // return true if one of the front bump values is 1, otherwise false
 }
 /******************************************************/
 bool is_back_bump()
 {
-	return (back_bump_left_value == 1 || back_bump_center_value == 1 || back_bump_right_value == 1); // return true if one of the back bump values is 1, otherwise false
+	return (back_bump_left_value == 0 || back_bump_center_value == 0 || back_bump_right_value == 0); // return true if one of the back bump values is 1, otherwise false
 }
 /******************************************************/
 
@@ -234,7 +214,7 @@ void drive(float left, float right, float delay_seconds)
 /******************************************************/
 void cruise_straight()
 {
-	drive(0.50, 0.50, 0.25);
+	drive(0.08, 0.08, 0.1);
 }
 /******************************************************/
 void cruise_arc()
@@ -250,32 +230,34 @@ void stop()
 void escape_front()
 {
 	
-    if(front_bump_left_value == 1 || front_bump_center_value == 1)
+    if(front_bump_left_value == 0)
     {
-        drive(-0.08, -1, 2); //drive backwards in an arc
+        drive(-0.1, -1, 2); //drive backwards in an arc
     }
-    else
+    else if(front_bump_right_value == 0)
     {
-        drive(-1, -0.08, 2); //drive backwards in an arc
+        drive(-1, -0.1, 2); //drive backwards in an arc
     }
 }
 /******************************************************/
 void escape_back()
 {
-	drive(0.9, 0.9, 0.25); //drive forward a little
+	drive(0.0, 0.0, 0.5); //drive forward a little
+    drive(0.5, 0.5, 0.25); //drive forward a little
 }
 /******************************************************/
 void seek_light()
 {
 	// greater photo_value means less light
 	int photo_difference = right_photo_value - left_photo_value;
+    printf("right_photo_value: %d, left_photo_value: %d, photo_difference: %d\n", right_photo_value, left_photo_value, photo_difference);
 	// positive photo_difference means left sensor is brighter
 	if (photo_difference > 0){
-		drive(-0.2, 0.2, 0.25);
+		drive(-0.2, 0.2, 0.10);
 	}
 	// negative photo_difference means right sensor is brighter
 	if (photo_difference < 0){
-		drive(0.2, -0.2, 0.25);
+		drive(0.2, -0.2, 0.10);
 	}
 }
 /******************************************************/
@@ -297,12 +279,12 @@ void avoid()
 {
 	if (left_ir_value > avoid_threshold)
 	{
-		drive(0.5, -0.5, 0.1);
+		drive(0.5, -0.5, 0.9);
 	}
 
 	else if (right_ir_value > avoid_threshold)
 	{
-		drive(-0.5, 0.5, 0.1);
+		drive(-0.5, 0.5, 0.9);
 	}
 }
 /******************************************************/
@@ -317,18 +299,54 @@ void approach()
 		drive(0.9, 0.1, 0.5);
 	}
 }
-
-//=====================================//
-//===============HELPERS===============//
-//=====================================//
-
-bool timer_elapsed()
-{
-	return (systime() > (start_time + timer_duration)); // return true if the current time is greater than our start time plus timer duration
-}
 /******************************************************/
-float map(float value, float start_range_low, float start_range_high, float target_range_low, float target_range_high)
+/******************************************************/
+
+//==================================//
+//===============MAIN===============//
+//==================================//
+
+int main() 
 {
-	return target_range_low + ((value - start_range_low) / (start_range_high - start_range_low)) * (target_range_high - target_range_low);
-	// remap a value from a source range to a new range
+	hierarchy_length = sizeof(subsumption_hierarchy) / sizeof(behavior); //set this variable once for loopin trhough the hierarchy
+	
+	enable_servo(LEFT_MOTOR_PIN);	//initialize both motors and set speed to zero
+	enable_servo(RIGHT_MOTOR_PIN);
+	drive(0.0,0.0,1.0);
+	
+	while(true){ //this is an infinite loop (true is always true)
+		if(timer_elapsed()){
+           
+            read_sensors(); //read all sensors and set global variables of their readouts
+           
+            if(is_front_bump())
+            {
+                escape_front();
+                //continue;
+            }
+            else if(is_above_distance_threshold(avoid_threshold))
+            {
+                avoid();
+            }
+            /*else if(is_back_bump())
+            {
+                escape_back();
+                //continue;
+            }*/
+            else if(is_above_photo_differential(photo_threshold))
+            {
+                seek_light();
+			}
+            else
+            {
+                cruise_straight();
+                //continue;
+            }
+            //seek_light();
+            //cruise_straight();
+        }
+    }//end while true
+	
+	return 0; //due to infinite while loop, we will never get here
 }
+

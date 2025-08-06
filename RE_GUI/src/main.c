@@ -69,45 +69,6 @@ int compare_ranks(const void *a, const void *b)
 	return (rank_a - rank_b); 
 } 
 
-//*************************************************** Function Declarations ***********************************************************//
-// PERCEPTION FUNCTIONS
-void read_sensors();							 // read all sensor values and save to global variables
-bool is_above_distance_threshold(int threshold); // return true if one and only one IR sensor is above the specified threshold
-bool is_above_photo_differential(int threshold); // return true if the absolute difference between photo sensor values is above the specified threshold
-bool is_front_bump();							 // return true if one of the front bumpers was hit
-bool is_back_bump();							 // return true if one of the back bumpers was hit
-bool timer_elapsed();							 // return true if our timer has elapsed
-
-//ACTIONS
-void escape_front();
-void escape_back();
-void seek_light();
-void seek_dark();
-void avoid();
-void approach();
-void cruise_straight();
-void cruise_arc();
-void stop();
-
-//MOTOR CONTROL
-void drive(float left, float right, float delay_seconds); //drive with a certain motor speed for a number of seconds
-
-//HELPER FUNCTIONS
-float map(float value, float start_range_low, float start_range_high, float target_range_low, float target_range_high); //remap a value from a source range to a new range
-
-// BUILT-IN FUNCTIONS
-void enable_servo(int pin);						// enable servo at the specified pin
-int analog_et(int pin);							// get the 10-bit analog value of a sensor on the specified pin
-int digital(int pin);							// get the digital value of a sensor on the specified pin
-unsigned long systime();						// get the system time
-void set_servo_position(int pin, int position); // set a servo at the specified pin to the specified position
-
-//GUI FUNCTIONS
-void update_gui(); //this function contains our gui update feature
-void print_subsumption_hierarchy(struct behavior *array, size_t len);
-void print_set_hierarchy();
-void randomize_hierarchy();
-
 // *** Variable Definitions *** //
 
 // global variables to store all current sensor values accessible to all functions and updated by the "read_sensors" function
@@ -143,6 +104,311 @@ bool show_gui = true;	//boolean toggled by pushing the white side button on the 
 bool first_gui = false; 	//on first exposure to gui, we randomize the hierarchy so the initialized behavior can't be observed
 bool is_side_update = false;			//sort on button press
 bool update_operating_console = false;	//a boolean to tell us when to update the operating console.  If we constantly reprint and clear, we get flicker, so we only print once when necessary
+
+//*************************************************** Function Declarations ***********************************************************//
+//=====================================//
+//===============HELPERS===============//
+//=====================================//
+
+bool timer_elapsed()
+{
+	return (systime() > (start_time + timer_duration)); // return true if the current time is greater than our start time plus timer duration
+}
+/******************************************************/
+float map(float value, float start_range_low, float start_range_high, float target_range_low, float target_range_high)
+{
+	return target_range_low + ((value - start_range_low) / (start_range_high - start_range_low)) * (target_range_high - target_range_low);
+	// remap a value from a source range to a new range
+}
+
+//========================================//
+//===============PERCEPTION===============//
+//========================================//
+
+void read_sensors()
+{
+	right_photo_value = analog(RIGHT_PHOTO_PIN);			// read the photo sensor at RIGHT_PHOTO_PIN; *** NOTE: greater value means less light ***
+	left_photo_value = analog(LEFT_PHOTO_PIN);			// read the photo sensor at LEFT_PHOTO_PIN; *** NOTE: greater value means less light ***
+	right_ir_value = analog(RIGHT_IR_PIN);				// read the IR sensor at RIGHT_IR_PIN
+	left_ir_value = analog(LEFT_IR_PIN);					// read the IR sensor at LEFT_IR_PIN
+	// read the bumpers
+	front_bump_left_value = digital(FRONT_BUMP_LEFT_PIN);   // read the bumper at FRONT_BUMP_LEFT_PIN
+	front_bump_center_value = digital(FRONT_BUMP_CENTER_PIN); // read the bumper at FRONT_BUMP_CENTER_PIN
+	front_bump_right_value = digital(FRONT_BUMP_RIGHT_PIN);  // read the bumper at FRONT_BUMP_RIGHT_PIN
+	back_bump_left_value = digital(BACK_BUMP_LEFT_PIN);	// read the bumper at BACK_BUMP_LEFT_PIN
+	back_bump_center_value = digital(BACK_BUMP_CENTER_PIN);  // read the bumper at BACK_BUMP_CENTER_PIN
+	back_bump_right_value = digital(BACK_BUMP_RIGHT_PIN);	// read the bumper at BACK_BUMP_RIGHT_PIN	
+}
+/******************************************************/
+bool is_above_photo_differential(int threshold)
+{
+	int photo_difference = abs(right_photo_value - left_photo_value); // get the difference between the photo values
+	return photo_difference > threshold;							  // returns true if the absolute difference between photo sensors is greater than the threshold, otherwise false
+}
+/******************************************************/
+bool is_above_distance_threshold(int threshold)
+{
+	return (left_ir_value > threshold || right_ir_value > threshold) && !(left_ir_value > threshold && right_ir_value > threshold);
+	// returns true if one (exclusive) IR value is above the threshold, otherwise false
+}
+
+/******************************************************/
+bool is_front_bump()
+{
+	return (front_bump_left_value == 0 || front_bump_right_value == 0); // return true if one of the front bump values is 1, otherwise false
+}
+/******************************************************/
+bool is_back_bump()
+{
+	return (back_bump_left_value == 0 || back_bump_center_value == 0 || back_bump_right_value == 0); // return true if one of the back bump values is 1, otherwise false
+}
+/******************************************************/
+
+//====================================//
+//===============ACTION===============//
+//====================================//
+
+/******************************************************/
+void drive(float left, float right, float delay_seconds)
+{
+	// 850 is full motor speed clockwise, 1250 is full motor speed counterclockwise
+	// Servo is stopped from ~1044 to 1055
+
+	float left_speed = map(left, -1.0, 1.0, 0, 2047); // call the map function to map our speed (set between -1 and 1) to the appropriate range of motor values
+	float right_speed = map(right, -1.0, 1.0, 2047, 0);
+
+	timer_duration = (int)(delay_seconds * 1000.0); // multiply our desired time in seconds by 1000 to get milliseconds and update this global variable
+	start_time = systime();							// update our start time to reflect the time we start driving (in ms)
+
+	set_servo_position(LEFT_MOTOR_PIN, left_speed);
+	set_servo_position(RIGHT_MOTOR_PIN, right_speed); // set the servos to run at the mapped speed
+}
+/******************************************************/
+void cruise_straight()
+{
+	drive(0.08, 0.08, 0.1);
+}
+/******************************************************/
+void cruise_arc()
+{
+	drive(0.25, 0.4, 0.5);
+}
+/******************************************************/
+void stop()
+{
+	drive(0.0, 0.0, 0.25);
+}
+/******************************************************/
+void escape_front()
+{
+	
+    if(front_bump_left_value == 0)
+    {
+        drive(-0.1, -1, 2); //drive backwards in an arc
+    }
+    else if(front_bump_right_value == 0)
+    {
+        drive(-1, -0.1, 2); //drive backwards in an arc
+    }
+}
+/******************************************************/
+void escape_back()
+{
+	drive(0.0, 0.0, 0.5); //drive forward a little
+    drive(0.5, 0.5, 0.25); //drive forward a little
+}
+/******************************************************/
+void seek_light()
+{
+	// greater photo_value means less light
+	int photo_difference = right_photo_value - left_photo_value;
+    printf("right_photo_value: %d, left_photo_value: %d, photo_difference: %d\n", right_photo_value, left_photo_value, photo_difference);
+	// positive photo_difference means left sensor is brighter
+	if (photo_difference > 0){
+		drive(-0.2, 0.2, 0.10);
+	}
+	// negative photo_difference means right sensor is brighter
+	if (photo_difference < 0){
+		drive(0.2, -0.2, 0.10);
+	}
+}
+/******************************************************/
+void seek_dark()
+{
+	// greater photo_value means less light
+	int photo_difference = right_photo_value - left_photo_value;
+	// positive photo_difference means left sensor is brighter
+	if (photo_difference > 0){
+		drive(-0.2, 0.2, 0.25);
+	}
+	// negative photo_difference means right sensor is brighter
+	if (photo_difference < 0){
+		drive(0.2, -0.2, 0.25);
+	}
+}
+/******************************************************/
+void avoid()
+{
+	if (left_ir_value > avoid_threshold)
+	{
+		drive(0.5, -0.5, 0.9);
+	}
+
+	else if (right_ir_value > avoid_threshold)
+	{
+		drive(-0.5, 0.5, 0.9);
+	}
+}
+/******************************************************/
+void approach()
+{
+	if (left_ir_value > approach_threshold)
+	{
+		drive(0.1, 0.9, 0.5);
+	}
+	else if (right_ir_value > approach_threshold)
+	{
+		drive(0.9, 0.1, 0.5);
+	}
+}
+/******************************************************/
+/******************************************************/
+
+//===============================GUI RELATED CODE========================================
+//===============================GUI RELATED CODE========================================
+//===============================GUI RELATED CODE========================================
+//-----------------RANDOMIZE HIERARCHY AND DEACTIVATE ALL-------------
+/*
+void randomize_hierarchy(){
+	size_t i;
+	for(i=0; i<hierarchy_length; i++){
+		subsumption_hierarchy[i].is_active = false;
+		subsumption_hierarchy[i].rank = rand();
+	}
+	qsort(subsumption_hierarchy, hierarchy_length, sizeof(behavior), compare_ranks); //sort our hierarchy based on rank value
+}*/
+//-------------------------MANAGE SCREEN PRINTING OF GUI--------------------
+void print_subsumption_hierarchy(struct behavior *array, size_t len){ 
+	size_t i;
+	for(i=0; i<len; i++){
+		display_printf(1,i,"%s          ",array[i].title);
+		if(array[i].is_active){
+			display_printf(17,i,"Active  ");
+		}
+		else{
+			display_printf(17,i,"Inactive ");
+		}
+		if(i == cursor_row){
+			display_printf(0, i, ">");
+			display_printf(25, i, "<");
+		}
+		else{
+			display_printf(0, i, " ");
+			display_printf(25, i, " ");
+		}
+		//display_printf(35, i, "%d", array[i].rank); //debug for showing rank
+	}
+}
+//--------------------MANAGE SCREEN PRINTING WHEN OPERATING---------------------
+void print_set_hierarchy(){ 
+	if(update_operating_console && !first_gui){
+		console_clear();
+		size_t i;
+		for(i=0; i<hierarchy_length; i++){
+			if(subsumption_hierarchy[i].is_active) printf(" %s\n",subsumption_hierarchy[i].title);
+		}
+		update_operating_console = false; //this only happens once per button press if we are not showing gui
+	}
+}
+
+void update_gui(){
+	if(side_button_clicked()){
+		show_gui = !show_gui; //toggle our gui by pressing the side button
+		is_side_update = show_gui; //boolean to do certain behaviors once at button press
+		update_operating_console = true; //boolean to update the home console once
+	}
+	
+	if(show_gui){
+		if(first_gui){
+			//randomize_hierarchy(); //this only ever happens once per program
+			first_gui = false;
+		}
+		
+		//stop();
+		bool cursor_update = false;
+		bool hierarchy_update = false;
+		
+		set_extra_buttons_visible(1); //we turn off the extra buttons (buttons xyz) when we are not in showgui mode, so we need to activate them here
+		
+		set_a_button_text(subsumption_hierarchy[cursor_row].is_active?"Deactivate":"Activate"); //set text to display activate or deactivate based on the behavior the cursor is on
+		set_b_button_text(subsumption_hierarchy[cursor_row].is_active?"Move Up":""); //set text to display "move up" or nothing based on the behavior the cursor is on
+		set_y_button_text(subsumption_hierarchy[cursor_row].is_active?"Move Down":"");	//set text to display "move down" or nothing based on the behavior the cursor is on
+		
+		set_c_button_text("\u25B2"); //up triangle unicode
+		set_z_button_text("\u25BC"); //unicode down triangle
+		
+		set_x_button_text("Reset");	//reset button for deactivating all
+		
+		if(c_button_clicked()){ //move the cursor up
+			cursor_row = (cursor_row - 1); //up cursor
+			if(cursor_row < 0) cursor_row += hierarchy_length; //if we go past zero, loop back to the end of the list
+			cursor_row = cursor_row%hierarchy_length;
+			cursor_update = true; //we've updated
+		}
+		
+		else if(z_button_clicked()) { //move cursor down
+			cursor_row = (cursor_row + 1)%hierarchy_length; //move cursor down and use modulus function to loop back to zero if we go down too far
+			cursor_update = true;
+		}
+		
+		else if(a_button_clicked()){ //activate or deactivate button
+			subsumption_hierarchy[cursor_row].is_active = !subsumption_hierarchy[cursor_row].is_active; //toggle our active state
+			hierarchy_update = true;
+		}
+		
+		else if(b_button_clicked()){
+			subsumption_hierarchy[cursor_row].rank -= 2; //move up
+			hierarchy_update = true;
+		}
+		
+		else if(y_button_clicked()){
+			subsumption_hierarchy[cursor_row].rank += 2; //move down
+			hierarchy_update = true;
+		}
+		
+		else if(x_button_clicked()){ //reset all button
+			size_t i; 
+			for(i=0; i<hierarchy_length; i++){
+				subsumption_hierarchy[i].is_active = false;
+			}
+			hierarchy_update = true;
+		}
+		
+		if(cursor_update || is_side_update || hierarchy_update){ //if we pressed anything at all
+			
+			qsort(subsumption_hierarchy, hierarchy_length, sizeof(behavior), compare_ranks); //sort our hierarchy based on rank value
+			
+			size_t i;
+			for(i=0; i<hierarchy_length; i++){
+				if(subsumption_hierarchy[i].is_active) subsumption_hierarchy[i].rank = i; //now reset the index of each sorted active behavior to be sequential with a step size of one
+				else subsumption_hierarchy[i].rank = hierarchy_length + 1; //give inactive behaviors a constant "poor" rank which is helpful to ensure new ones always jump above.
+			}
+			
+			console_clear(); // clear the console
+			print_subsumption_hierarchy(subsumption_hierarchy, hierarchy_length); //print the hierarchy and interface
+			is_side_update = false; //turn off the is_side_update boolean so we don't get screen flicker until we update the cursor or hierarchy next
+		}
+		
+	}
+	else{
+		set_a_button_text("");	//if we are not in show_gui mode, we must be operating, set our buttons to show nothing and hide the extra buttons
+		set_b_button_text("");	
+		set_c_button_text("");
+		set_extra_buttons_visible(0);
+	}
+}
+
+//============================END GUI RELATED CODE========================================
 
 //==================================//
 //===============MAIN===============//
@@ -230,299 +496,3 @@ int main()
 	return 0; //due to infinite while loop, we will never get here
 }
 
-//========================================//
-//===============PERCEPTION===============//
-//========================================//
-
-void read_sensors()
-{
-	right_photo_value = analog_et(RIGHT_PHOTO_PIN);			// read the photo sensor at RIGHT_PHOTO_PIN; *** NOTE: greater value means less light ***
-	left_photo_value = analog_et(LEFT_PHOTO_PIN);			// read the photo sensor at LEFT_PHOTO_PIN; *** NOTE: greater value means less light ***
-	right_ir_value = analog_et(RIGHT_IR_PIN);				// read the IR sensor at RIGHT_IR_PIN
-	left_ir_value = analog_et(LEFT_IR_PIN);					// read the IR sensor at LEFT_IR_PIN
-	// read the bumpers
-	front_bump_left_value = digital(FRONT_BUMP_LEFT_PIN);   // read the bumper at FRONT_BUMP_LEFT_PIN
-	front_bump_center_value = digital(FRONT_BUMP_CENTER_PIN); // read the bumper at FRONT_BUMP_CENTER_PIN
-	front_bump_right_value = digital(FRONT_BUMP_RIGHT_PIN);  // read the bumper at FRONT_BUMP_RIGHT_PIN
-	back_bump_left_value = digital(BACK_BUMP_LEFT_PIN);	// read the bumper at BACK_BUMP_LEFT_PIN
-	back_bump_center_value = digital(BACK_BUMP_CENTER_PIN);  // read the bumper at BACK_BUMP_CENTER_PIN
-	back_bump_right_value = digital(BACK_BUMP_RIGHT_PIN);	// read the bumper at BACK_BUMP_RIGHT_PIN	
-}
-/******************************************************/
-bool is_above_photo_differential(int threshold)
-{
-	int photo_difference = abs(right_photo_value - left_photo_value); // get the difference between the photo values
-	return photo_difference > threshold;							  // returns true if the absolute difference between photo sensors is greater than the threshold, otherwise false
-}
-/******************************************************/
-bool is_above_distance_threshold(int threshold)
-{
-	return (left_ir_value > threshold || right_ir_value > threshold) && !(left_ir_value > threshold && right_ir_value > threshold);
-	// returns true if one (exclusive) IR value is above the threshold, otherwise false
-}
-
-/******************************************************/
-bool is_front_bump()
-{
-	return (front_bump_left_value == 1 || front_bump_center_value == 1 || front_bump_right_value == 1); // return true if one of the front bump values is 1, otherwise false
-}
-/******************************************************/
-bool is_back_bump()
-{
-	return (back_bump_left_value == 1 || back_bump_center_value == 1 || back_bump_right_value == 1); // return true if one of the back bump values is 1, otherwise false
-}
-/******************************************************/
-
-//====================================//
-//===============ACTION===============//
-//====================================//
-
-/******************************************************/
-void drive(float left, float right, float delay_seconds)
-{
-	// 850 is full motor speed clockwise, 1250 is full motor speed counterclockwise
-	// Servo is stopped from ~1044 to 1055
-
-	float left_speed = map(left, -1.0, 1.0, 0, 2047); // call the map function to map our speed (set between -1 and 1) to the appropriate range of motor values
-	float right_speed = map(right, -1.0, 1.0, 2047, 0);
-
-	timer_duration = (int)(delay_seconds * 1000.0); // multiply our desired time in seconds by 1000 to get milliseconds and update this global variable
-	start_time = systime();							// update our start time to reflect the time we start driving (in ms)
-
-	set_servo_position(LEFT_MOTOR_PIN, left_speed);
-	set_servo_position(RIGHT_MOTOR_PIN, right_speed); // set the servos to run at the mapped speed
-}
-/******************************************************/
-void cruise_straight()
-{
-	drive(0.50, 0.50, 0.25);
-}
-/******************************************************/
-void cruise_arc()
-{
-	drive(0.25, 0.4, 0.5);
-}
-/******************************************************/
-void stop()
-{
-	drive(0.0, 0.0, 0.25);
-}
-/******************************************************/
-void escape_front()
-{
-	
-    if(front_bump_left_value == 1 || front_bump_center_value == 1)
-    {
-        drive(-0.08, -1, 2.5); //drive backwards in an arc
-    }
-    else
-    {
-        drive(-1, -0.08, 2.5); //drive backwards in an arc
-    }
-}
-/******************************************************/
-void escape_back()
-{
-	drive(0.9, 0.9, 0.25); //drive forward a little
-}
-/******************************************************/
-void seek_light()
-{
-	// greater photo_value means less light
-	int photo_difference = right_photo_value - left_photo_value;
-	// positive photo_difference means left sensor is brighter
-	if (photo_difference > 0){
-		drive(0.2, -0.2, 0.25);
-	}
-	// negative photo_difference means right sensor is brighter
-	if (photo_difference < 0){
-		drive(-0.2, 0.2, 0.25);
-	}
-}
-/******************************************************/
-void seek_dark()
-{
-	// greater photo_value means less light
-	int photo_difference = right_photo_value - left_photo_value;
-	// positive photo_difference means left sensor is brighter
-	if (photo_difference > 0){
-		drive(0.2, -0.2, 0.25);
-	}
-	// negative photo_difference means right sensor is brighter
-	if (photo_difference < 0){
-		drive(-0.2, 0.2, 0.25);
-	}
-}
-/******************************************************/
-void avoid()
-{
-	if (left_ir_value > avoid_threshold)
-	{
-		drive(0.5, -0.5, 0.1);
-	}
-
-	else if (right_ir_value > avoid_threshold)
-	{
-		drive(-0.5, 0.5, 0.1);
-	}
-}
-/******************************************************/
-void approach()
-{
-	if (left_ir_value > approach_threshold)
-	{
-		drive(0.1, 0.9, 0.5);
-	}
-	else if (right_ir_value > approach_threshold)
-	{
-		drive(0.9, 0.1, 0.5);
-	}
-}
-
-//=====================================//
-//===============HELPERS===============//
-//=====================================//
-
-bool timer_elapsed()
-{
-	return (systime() > (start_time + timer_duration)); // return true if the current time is greater than our start time plus timer duration
-}
-/******************************************************/
-float map(float value, float start_range_low, float start_range_high, float target_range_low, float target_range_high)
-{
-	return target_range_low + ((value - start_range_low) / (start_range_high - start_range_low)) * (target_range_high - target_range_low);
-	// remap a value from a source range to a new range
-}
-
-//===============================GUI RELATED CODE========================================
-//===============================GUI RELATED CODE========================================
-//===============================GUI RELATED CODE========================================
-void update_gui(){
-	if(side_button_clicked()){
-		show_gui = !show_gui; //toggle our gui by pressing the side button
-		is_side_update = show_gui; //boolean to do certain behaviors once at button press
-		update_operating_console = true; //boolean to update the home console once
-	}
-	
-	if(show_gui){
-		if(first_gui){
-			randomize_hierarchy(); //this only ever happens once per program
-			first_gui = false;
-		}
-		
-		//stop();
-		bool cursor_update = false;
-		bool hierarchy_update = false;
-		
-		set_extra_buttons_visible(1); //we turn off the extra buttons (buttons xyz) when we are not in showgui mode, so we need to activate them here
-		
-		set_a_button_text(subsumption_hierarchy[cursor_row].is_active?"Deactivate":"Activate"); //set text to display activate or deactivate based on the behavior the cursor is on
-		set_b_button_text(subsumption_hierarchy[cursor_row].is_active?"Move Up":""); //set text to display "move up" or nothing based on the behavior the cursor is on
-		set_y_button_text(subsumption_hierarchy[cursor_row].is_active?"Move Down":"");	//set text to display "move down" or nothing based on the behavior the cursor is on
-		
-		set_c_button_text("\u25B2"); //up triangle unicode
-		set_z_button_text("\u25BC"); //unicode down triangle
-		
-		set_x_button_text("Reset");	//reset button for deactivating all
-		
-		if(c_button_clicked()){ //move the cursor up
-			cursor_row = (cursor_row - 1); //up cursor
-			if(cursor_row < 0) cursor_row += hierarchy_length; //if we go past zero, loop back to the end of the list
-			cursor_row = cursor_row%hierarchy_length;
-			cursor_update = true; //we've updated
-		}
-		
-		else if(z_button_clicked()) { //move cursor down
-			cursor_row = (cursor_row + 1)%hierarchy_length; //move cursor down and use modulus function to loop back to zero if we go down too far
-			cursor_update = true;
-		}
-		
-		else if(a_button_clicked()){ //activate or deactivate button
-			subsumption_hierarchy[cursor_row].is_active = !subsumption_hierarchy[cursor_row].is_active; //toggle our active state
-			hierarchy_update = true;
-		}
-		
-		else if(b_button_clicked()){
-			subsumption_hierarchy[cursor_row].rank -= 2; //move up
-			hierarchy_update = true;
-		}
-		
-		else if(y_button_clicked()){
-			subsumption_hierarchy[cursor_row].rank += 2; //move down
-			hierarchy_update = true;
-		}
-		
-		else if(x_button_clicked()){ //reset all button
-			size_t i; 
-			for(i=0; i<hierarchy_length; i++){
-				subsumption_hierarchy[i].is_active = false;
-			}
-			hierarchy_update = true;
-		}
-		
-		if(cursor_update || is_side_update || hierarchy_update){ //if we pressed anything at all
-			
-			qsort(subsumption_hierarchy, hierarchy_length, sizeof(behavior), compare_ranks); //sort our hierarchy based on rank value
-			
-			size_t i;
-			for(i=0; i<hierarchy_length; i++){
-				if(subsumption_hierarchy[i].is_active) subsumption_hierarchy[i].rank = i; //now reset the index of each sorted active behavior to be sequential with a step size of one
-				else subsumption_hierarchy[i].rank = hierarchy_length + 1; //give inactive behaviors a constant "poor" rank which is helpful to ensure new ones always jump above.
-			}
-			
-			console_clear(); // clear the console
-			print_subsumption_hierarchy(subsumption_hierarchy, hierarchy_length); //print the hierarchy and interface
-			is_side_update = false; //turn off the is_side_update boolean so we don't get screen flicker until we update the cursor or hierarchy next
-		}
-		
-	}
-	else{
-		set_a_button_text("");	//if we are not in show_gui mode, we must be operating, set our buttons to show nothing and hide the extra buttons
-		set_b_button_text("");	
-		set_c_button_text("");
-		set_extra_buttons_visible(0);
-	}
-}
-//-----------------RANDOMIZE HIERARCHY AND DEACTIVATE ALL-------------
-void randomize_hierarchy(){
-	size_t i;
-	for(i=0; i<hierarchy_length; i++){
-		subsumption_hierarchy[i].is_active = false;
-		subsumption_hierarchy[i].rank = rand();
-	}
-	qsort(subsumption_hierarchy, hierarchy_length, sizeof(behavior), compare_ranks); //sort our hierarchy based on rank value
-}
-//-------------------------MANAGE SCREEN PRINTING OF GUI--------------------
-void print_subsumption_hierarchy(struct behavior *array, size_t len){ 
-	size_t i;
-	for(i=0; i<len; i++){
-		display_printf(1,i,"%s          ",array[i].title);
-		if(array[i].is_active){
-			display_printf(17,i,"Active  ");
-		}
-		else{
-			display_printf(17,i,"Inactive ");
-		}
-		if(i == cursor_row){
-			display_printf(0, i, ">");
-			display_printf(25, i, "<");
-		}
-		else{
-			display_printf(0, i, " ");
-			display_printf(25, i, " ");
-		}
-		//display_printf(35, i, "%d", array[i].rank); //debug for showing rank
-	}
-}
-//--------------------MANAGE SCREEN PRINTING WHEN OPERATING---------------------
-void print_set_hierarchy(){ 
-	if(update_operating_console && !first_gui){
-		console_clear();
-		size_t i;
-		for(i=0; i<hierarchy_length; i++){
-			if(subsumption_hierarchy[i].is_active) printf(" %s\n",subsumption_hierarchy[i].title);
-		}
-		update_operating_console = false; //this only happens once per button press if we are not showing gui
-	}
-}
-//============================END GUI RELATED CODE========================================
